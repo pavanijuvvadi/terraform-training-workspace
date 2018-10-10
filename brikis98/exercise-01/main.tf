@@ -13,6 +13,20 @@ resource "aws_instance" "example" {
 
   tags {
     # You'll want to change this to your own name
-    Name = "jim-testing"
+    Name = "${var.name}"
   }
+}
+
+variable "name" {
+  description = "Used to namespace all the resources"
+  default = "jim-testing-foo"
+}
+
+output "public_ip" {
+  # Syntax: <TYPE>.<ID>.<ATTRIBUTE>
+  value = "${aws_instance.example.public_ip}"
+}
+
+output "instance_id" {
+  value = "${aws_instance.example.id}"
 }
