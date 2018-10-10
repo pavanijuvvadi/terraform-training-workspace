@@ -5,18 +5,22 @@ provider "aws" {
 }
 
 resource "aws_instance" "example" {
-  ami = "${data.aws_ami.ubuntu.id}"
+  # This is Ubuntu 18.04
+  # You will have a different ID in ap-southeast-1
+  # ami = "ami-0fca02518e0faeb84"
+  ami = ${data.aws_ami.ubuntu.id}
 
-  instance_type = "t2.micro"
+  instance_type = "t3.micro"
   vpc_security_group_ids = ["${aws_security_group.example.id}"]
 
   user_data = <<EOF
-#!/bin/bash
-echo "Hello, World" > index.html
-nohup busybox httpd -f -p ${var.instance_http_port} &
-EOF
+  #!/bin/bash
+  echo "Hello, World" > index.html
+  nohup busybox httpd -f -p ${var.instance_http_port} &
+  EOF
 
   tags {
+    # You'll want to change this to your own name
     Name = "${var.name}"
   }
 }
@@ -40,33 +44,9 @@ resource "aws_security_group" "example" {
   }
 }
 
-data "aws_vpc" "default" {
-  default = true
-}
-
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  owners      = ["099720109477"] # Canonical
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-
-  filter {
-    name   = "architecture"
-    values = ["x86_64"]
-  }
-
-  filter {
-    name   = "image-type"
-    values = ["machine"]
-  }
-
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-bionic-18.04-amd64-server-*"]
-  }
+variable "instance_http_port" {
+  description = "The port the EC2 Instance will listen on for HTTP requests"
+  default = 8080
 }
 
 variable "name" {
@@ -99,11 +79,6 @@ data "aws_ami" "ubuntu" {
   }
 }
 
-variable "instance_http_port" {
-  description = "The port the EC2 Instance will listen on for HTTP requests"
-  default = 8080
-}
-
 output "public_ip" {
   # Syntax: <TYPE>.<ID>.<ATTRIBUTE>
   value = "${aws_instance.example.public_ip}"
@@ -111,8 +86,4 @@ output "public_ip" {
 
 output "instance_id" {
   value = "${aws_instance.example.id}"
-}
-
-output "default_vpc_id" {
-  value = "${data.aws_vpc.default.id}"
 }
