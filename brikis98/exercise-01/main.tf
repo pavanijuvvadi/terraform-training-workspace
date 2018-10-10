@@ -17,7 +17,6 @@ nohup busybox httpd -f -p ${var.instance_http_port} &
 EOF
 
   tags {
-    # You'll want to change this to your own name
     Name = "${var.name}"
   }
 }
