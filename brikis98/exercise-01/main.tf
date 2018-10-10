@@ -10,6 +10,13 @@ resource "aws_instance" "example" {
   ami = "ami-00035f41c82244dab"
 
   instance_type = "t2.micro"
+  vpc_security_group_ids = ["${aws_security_group.example.id}"]
+
+  user_data = <<EOF
+#!/bin/bash
+echo "Hello, World" > index.html
+nohup busybox httpd -f -p ${var.instance_http_port} &
+EOF
 
   tags {
     # You'll want to change this to your own name
@@ -17,9 +24,33 @@ resource "aws_instance" "example" {
   }
 }
 
+resource "aws_security_group" "example" {
+  name = "${var.name}"
+
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port = "${var.instance_http_port}"
+    to_port = "${var.instance_http_port}"
+    protocol = "tcp"
+    # Don't do this in production. Limit IPs in prod to trusted servers.
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
 variable "name" {
   description = "Used to namespace all the resources"
   default = "jim-testing-foo"
+}
+
+variable "instance_http_port" {
+  description = "The port the EC2 Instance will listen on for HTTP requests"
+  default = 8080
 }
 
 output "public_ip" {
