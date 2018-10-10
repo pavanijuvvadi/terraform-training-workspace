@@ -5,9 +5,7 @@ provider "aws" {
 }
 
 resource "aws_instance" "example" {
-  # This is Ubuntu 18.04
-  # You will have a different ID in ap-southeast-1
-  ami = "ami-00035f41c82244dab"
+  ami = "${data.aws_ami.ubuntu.id}"
 
   instance_type = "t2.micro"
   vpc_security_group_ids = ["${aws_security_group.example.id}"]
@@ -43,6 +41,35 @@ resource "aws_security_group" "example" {
   }
 }
 
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_ami" "ubuntu" {
+  most_recent = true
+  owners      = ["099720109477"] # Canonical
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+
+  filter {
+    name   = "architecture"
+    values = ["x86_64"]
+  }
+
+  filter {
+    name   = "image-type"
+    values = ["machine"]
+  }
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-bionic-18.04-amd64-server-*"]
+  }
+}
+
 variable "name" {
   description = "Used to namespace all the resources"
   default = "jim-testing-foo"
@@ -60,4 +87,8 @@ output "public_ip" {
 
 output "instance_id" {
   value = "${aws_instance.example.id}"
+}
+
+output "default_vpc_id" {
+  value = "${data.aws_vpc.default.id}"
 }
