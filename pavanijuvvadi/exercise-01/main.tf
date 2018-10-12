@@ -22,7 +22,7 @@ ami = "${data.aws_ami.ubuntu.id}"
 
   user_data = <<EOF
 #!/bin/bash
-echo "Hello, Pavani" > index.html
+echo "Hi, Nelson has changed your file!" > index.html
 nohup busybox httpd -f -p ${var.instance_http_port} &
 EOF
 
