@@ -5,6 +5,15 @@ provider "aws" {
     region = "ap-southeast-1"
 }
 
+terraform {
+  backend "s3" {
+    bucket = "terraform-jingxia-training-state"
+    region = "ap-southeast-1"  # You might want to use ap-southeast-1
+    key    = "jxNets/exercise-01/terraform.tfstate" # MAKE SURE TO USE A DIFFERENT KEY THAN YOUR TEAM MEMBERS!!!
+    encrypt = true
+    dynamodb_table = "terrraform-jingxia-training-lock"
+  }
+}
 resource "aws_instance" "example" {
 
     ami = "${data.aws_ami.ubuntu.id}"
