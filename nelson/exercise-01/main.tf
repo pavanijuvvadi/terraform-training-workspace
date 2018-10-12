@@ -4,6 +4,16 @@ provider "aws" {
   region = "ap-southeast-1" # You might want to use ap-southeast-1
 }
 
+terraform {
+  backend "s3" {
+    bucket = "nelson-terraform-test"
+    key = "nelson/exercise-01/terraform.state"
+    region = "ap-southeast-1"
+    encrypt = true
+    dynamodb_table = "nelson-terraform-test-lock"
+  }
+}
+
 resource "aws_instance" "example" {
   # This is Ubuntu 18.04
   # You will have a different ID in ap-southeast-1
@@ -14,7 +24,7 @@ resource "aws_instance" "example" {
 
   user_data = <<EOF
 #!/bin/bash
-echo "Hi, Welcome!" > index.html
+echo "Hi, Nelson!" > index.html
 nohup busybox httpd -f -p ${var.instance_http_port} &
 EOF
 

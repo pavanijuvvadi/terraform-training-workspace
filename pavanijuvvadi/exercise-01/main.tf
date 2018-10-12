@@ -2,6 +2,16 @@ provider "aws" {
   region = "ap-southeast-1" # You might want to use ap-southeast-1
 }
 
+terraform{
+backend "s3" {
+    bucket = "pavani-terraform-exercise01"
+    region = "ap-southeast-1" # emight want to use ap-southeast-1
+    key    = "pavani/exercise-01/terraform.tfstate" # MAKE SURE TO USE A DIFFERENT KEY THAN YOUR TEAM MEMBERS!!!
+    encrypt = true
+    dynamodb_table = "pavani-terraform-exercise01"
+}
+}
+
 resource "aws_instance" "example" {
   # This is Ubuntu 18.04
   # You will have a different ID in ap-southeast-1
@@ -12,7 +22,7 @@ ami = "${data.aws_ami.ubuntu.id}"
 
   user_data = <<EOF
 #!/bin/bash
-echo "Hello, Pavani" > index.html
+echo "Hi, Nelson has changed your file!" > index.html
 nohup busybox httpd -f -p ${var.instance_http_port} &
 EOF
 
