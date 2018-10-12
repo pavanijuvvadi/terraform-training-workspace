@@ -1,7 +1,17 @@
 # Look for a plugin called "Terraform" or "HCL" in your text editor / IDE to get syntax highlighting
 
 provider "aws" {
-  region = "ap-southeast-1" # You might want to use ap-southeast-1
+  region = "eu-west-1" # You might want to use ap-southeast-1
+}
+
+terraform {
+  backend "s3" {
+    bucket = "terraform-state-jim-training-nets"
+    region = "eu-west-1"  # You might want to use ap-southeast-1
+    key    = "brikis98/exercise-01/terraform.tfstate" # MAKE SURE TO USE A DIFFERENT KEY THAN YOUR TEAM MEMBERS!!!
+    encrypt = true
+    dynamodb_table = "TerraformTrainingLocksNets"
+  }
 }
 
 resource "aws_instance" "example" {
@@ -44,34 +54,9 @@ data "aws_vpc" "default" {
   default = true
 }
 
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  owners      = ["099720109477"] # Canonical
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-
-  filter {
-    name   = "architecture"
-    values = ["x86_64"]
-  }
-
-  filter {
-    name   = "image-type"
-    values = ["machine"]
-  }
-
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-bionic-18.04-amd64-server-*"]
-  }
-}
-
 variable "name" {
   description = "Used to namespace all the resources"
-  default = "pyh-var-test"
+  default = "jim-test"
 }
 
 data "aws_ami" "ubuntu" {
