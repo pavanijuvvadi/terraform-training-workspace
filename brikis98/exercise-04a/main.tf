@@ -150,30 +150,3 @@ resource "aws_security_group" "elb" {
     create_before_destroy = true
   }
 }
-
-variable "instance_http_port" {
-  description = "The port the EC2 Instance will listen on for HTTP requests"
-  default = 8080
-}
-
-variable "elb_http_port" {
-  description = "The port the ELB will listen on for HTTP requests"
-  default     = 80
-}
-
-variable "name" {
-  description = "Used to namespace all the resources"
-}
-
-variable "num_servers" {
-  description = "How many EC2 Instances to run in the Auto Scaling Group"
-  default = 3
-}
-
-output "elb_dns_name" {
-  value = "${aws_elb.web_servers.dns_name}"
-}
-
-output "asg_name" {
-  value = "${aws_autoscaling_group.web_servers.name}"
-}
