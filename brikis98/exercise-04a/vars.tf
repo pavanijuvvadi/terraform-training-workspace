@@ -16,3 +16,7 @@ variable "num_servers" {
   description = "How many EC2 Instances to run in the Auto Scaling Group"
   default = 3
 }
+
+variable "enable_route53_health_check" {
+  description = "If set to true, enable the Route 53 health check"
+}

@@ -7,6 +7,7 @@ module "frontend_app" {
 
   name = "jim-test-frontend"
   num_servers = 2
+  enable_route53_health_check = true
 }
 
 module "backend_app" {
@@ -14,4 +15,5 @@ module "backend_app" {
 
   name = "jim-test-backend"
   num_servers = 3
+  enable_route53_health_check = false
 }
