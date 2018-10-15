@@ -28,14 +28,19 @@ resource "aws_launch_configuration" "web_servers" {
   instance_type = "t2.micro"
   security_groups = ["${aws_security_group.web_server.id}"]
 
-  user_data = <<EOF
-#!/bin/bash
-echo "Hello, World from ${var.name} running at $(hostname)!!!" > index.html
-nohup busybox httpd -f -p ${var.instance_http_port} &
-EOF
+  user_data = "${data.template_file.user_data.rendered}"
 
   lifecycle {
     create_before_destroy = true
+  }
+}
+
+data "template_file" "user_data" {
+  template = "${file("${path.module}/user-data.sh")}"
+
+  vars {
+    name = "${var.name}"
+    port = "${var.instance_http_port}"
   }
 }
 
