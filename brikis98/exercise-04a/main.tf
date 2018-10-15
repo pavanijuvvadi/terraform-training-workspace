@@ -3,11 +3,12 @@ provider "aws" {
 }
 
 resource "aws_autoscaling_group" "web_servers" {
-  name_prefix = "${var.name}"
+  name_prefix = "${aws_launch_configuration.web_servers.name}"
 
   launch_configuration = "${aws_launch_configuration.web_servers.name}"
-  max_size = 3
-  min_size = 3
+  max_size = "${var.num_servers}"
+  min_size = "${var.num_servers}"
+  min_elb_capacity = "${var.num_servers}"
 
   load_balancers = ["${aws_elb.web_servers.name}"]
   health_check_type = "ELB"
@@ -19,6 +20,10 @@ resource "aws_autoscaling_group" "web_servers" {
     value = "${var.name}"
     propagate_at_launch = true
   }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_launch_configuration" "web_servers" {
@@ -29,7 +34,7 @@ resource "aws_launch_configuration" "web_servers" {
 
   user_data = <<EOF
 #!/bin/bash
-echo "Hello, World from $(hostname)" > index.html
+echo "Hello, World from EC2 Instance $(hostname)!!!" > index.html
 nohup busybox httpd -f -p ${var.instance_http_port} &
 EOF
 
@@ -60,6 +65,11 @@ resource "aws_elb" "web_servers" {
 
   tags {
     Name = "${var.name}"
+  }
+
+  # This is here because the autoscaling group sets it
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
@@ -138,6 +148,11 @@ resource "aws_security_group" "elb" {
     # Don't do this in production. Limit IPs in prod to trusted servers.
     cidr_blocks = ["0.0.0.0/0"]
   }
+
+  # This is here because the autoscaling group sets it
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 variable "instance_http_port" {
@@ -153,6 +168,11 @@ variable "elb_http_port" {
 variable "name" {
   description = "Used to namespace all the resources"
   default = "jim-test"
+}
+
+variable "num_servers" {
+  description = "How many EC2 Instances to run in the Auto Scaling Group"
+  default = 3
 }
 
 output "elb_dns_name" {
