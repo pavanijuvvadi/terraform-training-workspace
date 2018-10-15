@@ -150,3 +150,18 @@ resource "aws_security_group" "elb" {
     create_before_destroy = true
   }
 }
+
+resource "aws_route53_health_check" "site_is_up" {
+  count = "${var.enable_route53_health_check ? 1 : 0}"
+
+  fqdn = "${aws_elb.web_servers.dns_name}"
+  port = "${var.elb_http_port}"
+  resource_path = "/"
+  type = "HTTP"
+  failure_threshold = 5
+  request_interval = 30
+
+  tags {
+    Name = "${var.name}"
+  }
+}
