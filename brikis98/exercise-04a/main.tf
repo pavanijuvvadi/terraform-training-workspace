@@ -9,6 +9,9 @@ resource "aws_autoscaling_group" "web_servers" {
   max_size = 3
   min_size = 3
 
+  load_balancers = ["${aws_elb.web_servers.name}"]
+  health_check_type = "ELB"
+
   vpc_zone_identifier = ["${data.aws_subnet_ids.default.ids}"]
 
   tag {
@@ -32,6 +35,31 @@ EOF
 
   lifecycle {
     create_before_destroy = true
+  }
+}
+
+resource "aws_elb" "web_servers" {
+  name = "${var.name}"
+  security_groups = ["${aws_security_group.elb.id}"]
+  subnets = ["${data.aws_subnet_ids.default.ids}"]
+
+  listener {
+    lb_port = "${var.elb_http_port}"
+    lb_protocol = "HTTP"
+    instance_port = "${var.instance_http_port}"
+    instance_protocol = "HTTP"
+  }
+
+  health_check {
+    target = "HTTP:${var.instance_http_port}/"
+    healthy_threshold = 2
+    unhealthy_threshold = 5
+    interval = 15
+    timeout = 10
+  }
+
+  tags {
+    Name = "${var.name}"
   }
 }
 
@@ -93,12 +121,40 @@ resource "aws_security_group" "web_server" {
   }
 }
 
+resource "aws_security_group" "elb" {
+  name = "${var.name}-elb"
+
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port = "${var.elb_http_port}"
+    to_port = "${var.elb_http_port}"
+    protocol = "tcp"
+    # Don't do this in production. Limit IPs in prod to trusted servers.
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
 variable "instance_http_port" {
   description = "The port the EC2 Instance will listen on for HTTP requests"
   default = 8080
 }
 
+variable "elb_http_port" {
+  description = "The port the ELB will listen on for HTTP requests"
+  default     = 80
+}
+
 variable "name" {
   description = "Used to namespace all the resources"
   default = "jim-test"
+}
+
+output "elb_dns_name" {
+  value = "${aws_elb.web_servers.dns_name}"
 }
