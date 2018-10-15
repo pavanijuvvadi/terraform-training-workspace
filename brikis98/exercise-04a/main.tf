@@ -1,7 +1,3 @@
-provider "aws" {
-  region = "eu-west-1" # You might want to use ap-southeast-1
-}
-
 resource "aws_autoscaling_group" "web_servers" {
   name_prefix = "${aws_launch_configuration.web_servers.name}"
 
@@ -34,7 +30,7 @@ resource "aws_launch_configuration" "web_servers" {
 
   user_data = <<EOF
 #!/bin/bash
-echo "Hello, World from EC2 Instance $(hostname)!!!" > index.html
+echo "Hello, World from ${var.name} running at $(hostname)!!!" > index.html
 nohup busybox httpd -f -p ${var.instance_http_port} &
 EOF
 
@@ -167,7 +163,6 @@ variable "elb_http_port" {
 
 variable "name" {
   description = "Used to namespace all the resources"
-  default = "jim-test"
 }
 
 variable "num_servers" {
@@ -177,4 +172,8 @@ variable "num_servers" {
 
 output "elb_dns_name" {
   value = "${aws_elb.web_servers.dns_name}"
+}
+
+output "asg_name" {
+  value = "${aws_autoscaling_group.web_servers.name}"
 }
