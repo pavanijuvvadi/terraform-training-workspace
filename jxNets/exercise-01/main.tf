@@ -14,6 +14,7 @@ terraform {
     dynamodb_table = "terrraform-jingxia-training-lock"
   }
 }
+
 resource "aws_instance" "example" {
 
     ami = "${data.aws_ami.ubuntu.id}"
