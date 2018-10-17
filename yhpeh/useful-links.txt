@@ -1,0 +1,11 @@
+Provider Plugin Cache
+=====================
+https://www.terraform.io/docs/configuration/providers.html#provider-plugin-cache
+
+Interpolation
+=============
+https://www.terraform.io/docs/configuration/interpolation.html
+
+Github for Terraform training
+=============================
+https://github.com/yhpeh/terraform-training-workspace
