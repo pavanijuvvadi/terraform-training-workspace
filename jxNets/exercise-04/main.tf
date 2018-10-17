@@ -1,19 +1,3 @@
-# Look for a plugin called "Terraform" or "HCL" in your text editor / IDE to get syntax highlighting
-
-provider "aws" {
-  region = "ap-southeast-1" # You might want to use ap-southeast-1
-}
-
-# terraform {
-#   backend "s3" {
-#     bucket = "nelson-terraform-test"
-#     key = "nelson/exercise-01/terraform.state"
-#     region = "ap-southeast-1"
-#     encrypt = true
-#     dynamodb_table = "nelson-terraform-test-lock"
-#   }
-# }
-
 resource "aws_autoscaling_group" "web_servers" {
   name_prefix = "${aws_launch_configuration.web_servers.name}"
 
@@ -44,14 +28,19 @@ resource "aws_launch_configuration" "web_servers" {
   instance_type = "t2.micro"
   security_groups = ["${aws_security_group.web_server.id}"]
 
-  user_data = <<EOF
-#!/bin/bash
-echo "Hello, World from EC2 instance $(hostname)" > index.html
-nohup busybox httpd -f -p ${var.instance_http_port} &
-EOF
+  user_data = "${data.template_file.user_data.rendered}"
 
   lifecycle {
     create_before_destroy = true
+  }
+}
+
+data "template_file" "user_data" {
+  template = "${file("${path.module}/user-data.sh")}"
+
+  vars {
+    name = "${var.name}"
+    port = "${var.instance_http_port}"
   }
 }
 
@@ -76,23 +65,55 @@ resource "aws_elb" "web_servers" {
   }
 
   tags {
-    name = "${var.name}"
+    Name = "${var.name}"
   }
 
+  # This is here because the autoscaling group sets it
   lifecycle {
     create_before_destroy = true
   }
 }
 
+data "aws_ami" "ubuntu" {
+  most_recent = true
+  owners      = ["099720109477"] # Canonical
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+
+  filter {
+    name   = "architecture"
+    values = ["x86_64"]
+  }
+
+  filter {
+    name   = "image-type"
+    values = ["machine"]
+  }
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-bionic-18.04-amd64-server-*"]
+  }
+}
+
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_subnet_ids" "default" {
+  vpc_id = "${data.aws_vpc.default.id}"
+}
 
 resource "aws_security_group" "web_server" {
-  name ="${var.name}"
+  name = "${var.name}"
 
   egress {
     from_port = 0
     to_port = 0
-    protocol = "tcp"
-    # Don't do this in production. Limit by IP
+    protocol = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
@@ -100,9 +121,12 @@ resource "aws_security_group" "web_server" {
     from_port = "${var.instance_http_port}"
     to_port = "${var.instance_http_port}"
     protocol = "tcp"
+    # Don't do this in production. Limit IPs in prod to trusted servers.
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # This is here because the aws_launch_configuration depends on this resource and aws_launch_configuration sets
+  # create_before_destroy to true
   lifecycle {
     create_before_destroy = true
   }
@@ -132,59 +156,17 @@ resource "aws_security_group" "elb" {
   }
 }
 
-data "aws_vpc" "default" {
-  default = true
-}
+resource "aws_route53_health_check" "site_is_up" {
+  count = "${var.enable_route53_health_check ? 1 : 0}"
 
-data "aws_subnet_ids" "default" {
-  vpc_id = "${data.aws_vpc.default.id}"
-}
+  fqdn = "${aws_elb.web_servers.dns_name}"
+  port = "${var.elb_http_port}"
+  resource_path = "/"
+  type = "HTTP"
+  failure_threshold = 5
+  request_interval = 30
 
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  owners = ["099720109477"] # Canonical
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
+  tags {
+    Name = "${var.name}"
   }
-
-  filter {
-    name   = "architecture"
-    values = ["x86_64"]
-  }
-
-  filter {
-    name   = "image-type"
-    values = ["machine"]
-  }
-
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-bionic-18.04-amd64-server-*"]
-  }
-}
-
-variable "instance_http_port" {
-  description = "port number used by app"
-  default = 8080
-}
-
-variable "name" {
-  description = "Used to namespace all the resources"
-  default = "nelson-terraform"
-}
-
-variable "elb_http_port" {
-  description = "The port the ELB will listen on for HTTP requests"
-  default = 80
-}
-
-variable "num_servers" {
-  description = "How many EC2 Instances to run in the Auto Scaling Group"
-  default = 3
-}
-
-output "elb_dns_name" {
-  value = "${aws_elb.web_servers.dns_name}"
 }
