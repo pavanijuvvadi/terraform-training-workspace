@@ -3,13 +3,13 @@ provider "aws" {
 }
 
 module "npssupport_account" {
-  source = "../module"
+  source        = "module"
 
-  name   = "npssupportuser"
+  account_alias = "npssupportuser"
 }
 
 module "cert_account" {
-  source = "../module"
+  source        = "module"
 
-  name   = "LayLee@nets.com.sg"
+  account_alias = "laylee"
 }
