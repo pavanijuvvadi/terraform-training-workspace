@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+#
+# This script is used to run process-cert-requests.
+#
+set -e
+
+readonly DEFAULT_IS_SYSLOG="false"
+readonly DEFAULT_IS_DEV_MODE="false"
+
+readonly SUPERVISOR_CONFIG_PATH="/etc/supervisor/conf.d/openvpn-admin-revokes.conf"
+readonly BIN_FULL_PATH="/usr/local/bin/openvpn-admin"
+readonly BIN_NAME="openvpn-admin"
+readonly LOG_DIR="/var/log"
+
+readonly BASH_COMMONS_DIR="/opt/gruntwork/bash-commons"
+
+if [[ ! -d "$BASH_COMMONS_DIR" ]]; then
+  echo "ERROR: this script requires that bash-commons is installed in $BASH_COMMONS_DIR. See https://github.com/gruntwork-io/bash-commons for more info."
+  exit 1
+fi
+
+source "$BASH_COMMONS_DIR/log.sh"
+source "$BASH_COMMONS_DIR/assert.sh"
+
+function print_usage {
+  echo
+  echo "Usage: run-process-revokes [OPTIONS]"
+  echo
+  echo "Run openvpn-admin with the process-revokes option."
+  echo
+  echo "Required Arguments:"
+  echo
+  echo -e "  --region\t\t\tThe AWS region where the revocation SQS queue is deployed."
+  echo
+  echo "Optional Arguments:"
+  echo
+  echo -e "  --revoke-url\t\t\tThe URL of the revoke queue."
+  echo -e "  --syslog\t\t\tIf specified, all log output will be sent to syslog instead of written to a file in /var/log."
+  echo
+  echo "Example:"
+  echo
+  echo "  run-process-revokes \\"
+  echo "     --syslog"
+}
+
+# Assert that this script is being run on an EC2 Instance
+function assert_is_ec2_instance {
+  curl --silent -o /dev/null --fail "http://169.254.169.254/latest/meta-data/" && :
+}
+
+function generate_supervisor_config {
+  local -r supervisor_config_path="$1"
+  local -r use_syslog="$2"
+  local -r region="$3"
+  local -r revoke_url="$4"
+
+  local stdout_logfile_dest
+
+  log_info "Creating Supervisor config file to run $BIN_NAME in $supervisor_config_path"
+
+  # - Using simply the keyword "syslog" for the stdout_logfile will direct supervisord to write to syslog.
+  if [[ "$use_syslog" == "true" ]]; then
+    log_info "$BIN_NAME logs will be directed to syslog"
+    stdout_logfile_dest="syslog"
+  else
+    stdout_logfile_dest="/var/log/$BIN_NAME-revokes.log"
+  fi
+
+  params="--aws-region \"$region\""
+  if [[ -n "$revoke_url" ]]; then
+    params="--aws-region \"$region\" --revoke-url=\"$revoke_url\""
+  fi
+
+  cat > "$supervisor_config_path" <<EOF
+[program:$BIN_NAME-revokes]
+command=$BIN_FULL_PATH process-revokes $params
+environment=AWS_DEFAULT_REGION="$region"
+stdout_logfile=$stdout_logfile_dest
+redirect_stderr=true
+numprocs=1
+autostart=true
+autorestart=true
+stopsignal=TERM
+stopwaitsecs=300
+EOF
+}
+
+function start_process_cert_revocations {
+  log_info "Reloading Supervisor config and starting $BIN_NAME"
+  supervisorctl reread
+  supervisorctl update
+}
+
+function run_process_requests {
+  local is_syslog="$DEFAULT_IS_SYSLOG"
+  local region
+  local revoke_url
+
+  while [[ $# > 0 ]]; do
+    local key="$1"
+
+    case "$key" in
+    --region)
+      region="$2"
+      shift
+      ;;
+    --revoke-url)
+      revoke_url="$2"
+      shift
+      ;;
+    --syslog)
+      is_syslog="true"
+      ;;
+    --help)
+      print_usage
+      exit
+      ;;
+    *)
+      log_error "Unrecognized argument: $key"
+      print_usage
+      exit 1
+      ;;
+    esac
+
+    shift
+  done
+
+  # Assert our assumptions and validate input
+  assert_uid_is_root_or_sudo
+  assert_is_ec2_instance
+  assert_not_empty "--region" "$region"
+
+  generate_supervisor_config \
+    "$SUPERVISOR_CONFIG_PATH" \
+    "$is_syslog" \
+    "$region" \
+    "$revoke_url"
+
+  start_process_cert_revocations
+}
+
+run_process_requests "$@"

@@ -1,0 +1,82 @@
+#!/bin/bash
+
+#
+# Install the latest OpenVPN Server on Ubuntu 16 from the OpenVPN apt repositories.
+#
+
+# Immediately exit if any command fails
+set -e
+
+readonly CA_PATH="/etc/openvpn-ca"
+readonly OPENVPN_PATH="/etc/openvpn"
+readonly BASH_COMMONS_DIR="/opt/gruntwork/bash-commons"
+
+if [[ ! -d "$BASH_COMMONS_DIR" ]]; then
+  echo "ERROR: this script requires that bash-commons is installed in $BASH_COMMONS_DIR. See https://github.com/gruntwork-io/bash-commons for more info."
+  exit 1
+fi
+
+source "$BASH_COMMONS_DIR/log.sh"
+source "$BASH_COMMONS_DIR/assert.sh"
+source "$BASH_COMMONS_DIR/file.sh"
+
+# Import the public GPG key used to sign the OpenVPN packages.
+function import_gpg_key {
+  local -r gpg_key_url="$1"
+  wget -O - "$gpg_key_url" | sudo apt-key add -
+}
+
+# Create a sources.list fragment (as root) so that apt can find the new OpenVPN packages.
+function create_apt_sources_list_fragment {
+    local -r apt_repo_url="$1"
+    local -r ubuntu_distro_name="$2"
+
+    file_append_text "deb $apt_repo_url $ubuntu_distro_name main" "/etc/apt/sources.list.d/swupdate.openvpn.net.list"
+}
+
+# Use apt to install the latest OpenVPN
+function install_openvpn_package {
+    log_info "Installing OpenVPN package..."
+    apt-get update
+    apt-get -y install openssl easy-rsa openvpn supervisor
+    log_info "Making CA directory in $CA_PATH..."
+    make-cadir $CA_PATH
+}
+
+function copy_wrapper_scripts {
+    log_info "Installing Wrapper Scripts..."
+    cp /gruntwork/install-openvpn/generate-wrapper.sh $CA_PATH
+    cp /gruntwork/install-openvpn/revoke-wrapper.sh $CA_PATH
+    chmod +x $CA_PATH/generate-wrapper.sh
+    chmod +x $CA_PATH/revoke-wrapper.sh
+}
+
+function install_aws_cli {
+    log_info "Install AWS CLI..."
+    apt-get -y install python-pip jq
+    pip install awscli
+}
+
+# Upgrade OpenSSL to the latest version
+function upgrade_openssl {
+    log_info "Upgrading OpenSSL..."
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y openssl
+}
+
+# Our main function
+function install_openvpn {
+    local -r ubuntu_distro_name="xenial" # xenial = ubuntu16
+    local -r apt_repo_url="http://build.openvpn.net/debian/openvpn/stable"
+    local -r gpg_key_url="https://swupdate.openvpn.net/repos/repo-public.gpg"
+
+    assert_uid_is_root_or_sudo
+
+    import_gpg_key "$gpg_key_url"
+    create_apt_sources_list_fragment "$apt_repo_url" "$ubuntu_distro_name"
+    install_openvpn_package
+    copy_wrapper_scripts
+    upgrade_openssl
+    install_aws_cli
+}
+
+install_openvpn

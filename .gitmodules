@@ -1,0 +1,3 @@
+[submodule "yhpeh/yhpeh/static-assets"]
+	path = yhpeh/yhpeh/static-assets
+	url = https://github.com/yhpeh/terraform-training-workspace
