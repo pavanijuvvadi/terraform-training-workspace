@@ -1,0 +1,6 @@
+dist
+ecs_service_deployment_checker.*
+.python-version
+.tox
+__pycache__
+*.pyc

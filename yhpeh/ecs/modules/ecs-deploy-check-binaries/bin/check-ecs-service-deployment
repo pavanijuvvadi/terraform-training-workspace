@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#
+# Script to select the right version ECS deployment checker and execute it
+#
+
+set -e
+
+# Locate the directory in which this binary is located
+readonly BINARY_SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+execute() {
+    local -r PYTHON_MAJOR_VERSION="$(python -V 2>&1 | sed 's/Python \([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)/\1/')"
+    if [[ "$PYTHON_MAJOR_VERSION" == "3" ]]; then
+        exec "${BINARY_SOURCE_DIR}"/check-ecs-service-deployment-py3 $@
+    elif [ "$PYTHON_MAJOR_VERSION" == "2" ]; then
+        exec "${BINARY_SOURCE_DIR}"/check-ecs-service-deployment-py27 $@
+    else
+        echo "could not find a valid python binary" >&2
+        exit 1
+    fi
+}
+
+execute "$@"

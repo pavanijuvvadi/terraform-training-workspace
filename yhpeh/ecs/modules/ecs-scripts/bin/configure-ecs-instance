@@ -1,0 +1,278 @@
+#!/bin/bash
+#
+# This script configures an EC2 Instance so it registers in the specified ECS cluster and uses the specified
+# credentials for private Docker registry access. Note that this script can only be run as root on an EC2 instance with
+# the Amazon ECS-optimized AMI installed.
+
+set -e
+
+readonly ECS_CONFIG_FILE="/etc/ecs/ecs.config"
+readonly ECS_USER="ec2-user"
+
+readonly DOCKER_AUTH_TYPE_ECR="ecr"
+readonly DOCKER_AUTH_TYPE_HUB="docker-hub"
+readonly DOCKER_AUTH_TYPE_GITLAB="docker-gitlab"
+readonly DOCKER_AUTH_TYPE_OTHER="docker-other"
+readonly DOCKER_AUTH_TYPE_NONE="none"
+
+readonly DEFAULT_DOCKER_HUB_URL="https://index.docker.io/v1/"
+readonly DEFAULT_GITLAB_REGISTRY_URL="registry.gitlab.com"
+
+function print_usage {
+  echo
+  echo "Usage: configure-ecs-instance [OPTIONS]"
+  echo
+  echo "This script configures an EC2 Instance so it registers in the specified ECS cluster and uses the specified credentials for private Docker registry access."
+  echo
+  echo "Options:"
+  echo
+  echo -e "  --ecs-cluster-name\tThe name of the ECS cluster to register in. Required."
+  echo -e "  --docker-auth-type\tThe type of Docker registry to use. Must be one of: $DOCKER_AUTH_TYPE_ECR, $DOCKER_AUTH_TYPE_HUB, $DOCKER_AUTH_TYPE_GITLAB, $DOCKER_AUTH_TYPE_OTHER, $DOCKER_AUTH_TYPE_NONE. If ecr, will try to authenticate to ECR using IAM role."
+  echo -e "                    \tIf other, you must specify the auth details with the environment variables DOCKER_REPO_URL, DOCKER_REPO_AUTH, and DOCKER_REPO_EMAIL. Required."
+  echo -e "  --ecr-aws-region\t\tThe name of the AWS region you're using for ECR (e.g. us-east-1). Only used if --docker-auth-type is $DOCKER_AUTH_TYPE_ECR."
+  echo -e "  --help\t\tShow this help text and exit."
+  echo
+  echo "Example:"
+  echo
+  echo "  configure-ecs-instance --ecs-cluster-name my-ecs-cluster --docker-auth-type ecr"
+}
+
+function file_contains_text {
+  local readonly text="$1"
+  local readonly file="$2"
+  grep -q "$text" "$file"
+}
+
+function file_exists {
+  local readonly file="$1"
+  [[ -f "$file" ]]
+}
+
+function append_text_in_file {
+  local readonly text="$1"
+  local readonly file="$2"
+
+  echo -e "$text" >> "$file"
+}
+
+function replace_text_in_file {
+  local readonly original_text_regex="$1"
+  local readonly replacement_text="$2"
+  local readonly file="$3"
+
+  sed -i "s|$original_text_regex|$replacement_text|" "$file"
+}
+
+function replace_or_append_in_file {
+  local readonly original_text_regex="$1"
+  local readonly replacement_text="$2"
+  local readonly file="$3"
+
+  if $(file_exists "$file") && $(file_contains_text "$original_text_regex" "$file"); then
+    replace_text_in_file "$original_text_regex" "$replacement_text" "$file"
+  else
+    append_text_in_file "$replacement_text" "$file"
+  fi
+}
+
+function configure_docker_auth {
+  local readonly docker_auth_type="$1"
+  local readonly ecr_aws_region="$2"
+
+  case "$docker_auth_type" in
+    "$DOCKER_AUTH_TYPE_ECR")
+      configure_ecr_auth "$ecr_aws_region"
+      ;;
+    "$DOCKER_AUTH_TYPE_HUB")
+      local readonly docker_repo_url="${DOCKER_REPO_URL:-$DEFAULT_DOCKER_HUB_URL}"
+      assert_env_var_not_empty "DOCKER_REPO_AUTH"
+      assert_env_var_not_empty "DOCKER_REPO_EMAIL"
+
+      configure_docker_auth_other "$docker_repo_url" "$DOCKER_REPO_AUTH" "$DOCKER_REPO_EMAIL"
+      ;;
+    "$DOCKER_AUTH_TYPE_GITLAB")
+      local readonly docker_repo_url="${DOCKER_REPO_URL:-$DEFAULT_GITLAB_REGISTRY_URL}"
+      assert_env_var_not_empty "DOCKER_REPO_AUTH"
+
+      configure_docker_auth_other "$docker_repo_url" "$DOCKER_REPO_AUTH"
+      ;;
+    "$DOCKER_AUTH_TYPE_OTHER")
+      assert_env_var_not_empty "DOCKER_REPO_URL"
+      assert_env_var_not_empty "DOCKER_REPO_AUTH"
+
+      configure_docker_auth_other "$DOCKER_REPO_URL" "$DOCKER_REPO_AUTH" "$DOCKER_REPO_EMAIL"
+      ;;
+    "$DOCKER_AUTH_TYPE_NONE")
+      echo "--docker-auth-type set to $DOCKER_AUTH_TYPE_NONE, so will not configure any authentication for a private Docker repo."
+      ;;
+    *)
+      echo "ERROR: Unrecognized Docker auth type: $docker_auth_type"
+      exit 1
+  esac
+}
+
+function configure_docker_auth_other {
+  local readonly docker_repo_url="$1"
+  local readonly docker_repo_auth="$2"
+  local readonly docker_repo_email="$3"
+
+  local email_attr
+  if [[ ! -z "$docker_repo_email" ]]; then
+    email_attr=",\"email\":\"$docker_repo_email\""
+  fi
+
+  echo "Configuring instance with auth details for Docker repo $docker_repo_url"
+  replace_or_append_in_file "ECS_ENGINE_AUTH_TYPE=.*" "ECS_ENGINE_AUTH_TYPE=dockercfg" "$ECS_CONFIG_FILE"
+  replace_or_append_in_file "ECS_ENGINE_AUTH_DATA=.*" "ECS_ENGINE_AUTH_DATA={\"$docker_repo_url\":{\"auth\":\"$docker_repo_auth\"$email_attr}}" "$ECS_CONFIG_FILE"
+}
+
+# http://askubuntu.com/a/606149
+function run_cmd_as_user {
+  local readonly command="$1"
+  local readonly user="$2"
+  su - "$user" -c "$command"
+}
+
+# When using the AWS ECR registry, we have to refresh the Docker login credentials every 12 hours or they expire.
+function create_ecr_cron_job {
+  local readonly ecr_aws_region="$1"
+
+  echo "Adding a CRON job to refresh ECR credentials every 12 hours"
+  # We want append to the crontab here, rather than overwrite it. crontab -l -u $ECS_USER will output the current value
+  # of the crontab for $ECS_USER, but if the crontab is empty, it will emit an error, which we want to hide in this
+  # case by redirecting stderr to /dev/null.
+  #
+  # Note that the cronjob itself first calls "aws ... erc get-login" to generate a "docker login ..." command and then
+  # calls "eval" on this to immediately execute the "docker login ..." command.
+  TEMP_CRONTAB_FILE="/tmp/crontab"
+  crontab -l -u $ECS_USER 2>/dev/null > $TEMP_CRONTAB_FILE
+  echo '0 */12 * * * eval \$(aws --region $ecr_aws_region ecr get-login --no-include-email)' >> $TEMP_CRONTAB_FILE
+  crontab -u $ECS_USER $TEMP_CRONTAB_FILE
+}
+
+function login_to_ecr {
+  local readonly ecr_aws_region="$1"
+
+  echo "Logging into ECR"
+  run_cmd_as_user "eval $(aws --region $ecr_aws_region ecr get-login --no-include-email)" "$ECS_USER"
+}
+
+function configure_ecr_auth {
+  local readonly ecr_aws_region="$1"
+
+  login_to_ecr "$ecr_aws_region"
+  create_ecr_cron_job "$ecr_aws_region"
+}
+
+function configure_ecs_cluster {
+  local readonly ecs_cluster_name="$1"
+
+  echo "Configuring instance to register in the ECS cluster $ecs_cluster_name"
+  replace_or_append_in_file "ECS_CLUSTER=.*" "ECS_CLUSTER=$ecs_cluster_name" "$ECS_CONFIG_FILE"
+}
+
+function assert_is_installed {
+  local readonly name="$1"
+
+  if [[ ! $(command -v ${name}) ]]; then
+    echo "ERROR: The binary '$name' is required by this script but is not installed or in the system's PATH."
+    exit 1
+  fi
+}
+
+function assert_uid_is_root_or_sudo {
+  if [[ $EUID != 0 ]]; then
+    echo "ERROR: This script should be run using sudo or as the root user"
+    exit 1
+  fi
+}
+
+function assert_env_var_not_empty {
+  local readonly var_name="$1"
+  local readonly var_value="${!var_name}"
+
+  if [[ -z "$var_value" ]]; then
+    echo "ERROR: Required environment $var_name not set."
+    exit 1
+  fi
+}
+
+function assert_not_empty {
+  local readonly arg_name="$1"
+  local readonly arg_value="$2"
+
+  if [[ -z "$arg_value" ]]; then
+    echo "ERROR: The value for '$arg_name' cannot be empty"
+    print_usage
+    exit 1
+  fi
+}
+
+function assert_value_in_set {
+  local readonly value_name="$1"
+  local readonly value="$2"
+  shift 2
+  local readonly set=($@)
+  local item=""
+
+  for item in "${set[@]}"; do
+    if [[ "$item" == "$value" ]]; then
+      return
+    fi
+  done
+
+  echo "ERROR: Value $value is not a valid value for $value_name. It must be one of: ${set[@]}"
+  exit 1
+}
+
+function configure_ecs_instance {
+  local ecs_cluster_name=""
+  local docker_auth_type=""
+  local ecr_aws_region=""
+
+  while [[ $# > 0 ]]; do
+    local key="$1"
+
+    case "$key" in
+      --ecs-cluster-name)
+        ecs_cluster_name="$2"
+        shift
+        ;;
+      --docker-auth-type)
+        docker_auth_type="$2"
+        shift
+        ;;
+      --ecr-aws-region)
+        ecr_aws_region="$2"
+        shift
+        ;;
+      --help)
+        print_usage
+        exit
+        ;;
+      *)
+        echo "ERROR: Unrecognized argument: $key"
+        print_usage
+        exit 1
+        ;;
+    esac
+
+    shift
+  done
+
+  assert_uid_is_root_or_sudo
+  assert_is_installed "aws"
+
+  assert_not_empty "--ecs-cluster-name" "$ecs_cluster_name"
+
+  assert_value_in_set "--docker-auth-type" "$docker_auth_type" "$DOCKER_AUTH_TYPE_ECR" "$DOCKER_AUTH_TYPE_HUB" "$DOCKER_AUTH_TYPE_GITLAB" "$DOCKER_AUTH_TYPE_OTHER" "$DOCKER_AUTH_TYPE_NONE"
+
+  if [[ "$docker_auth_type" == "$DOCKER_AUTH_TYPE_ECR" ]]; then
+    assert_not_empty "--ecr-aws-region" "$ecr_aws_region"
+  fi
+
+  configure_ecs_cluster "$ecs_cluster_name"
+  configure_docker_auth "$docker_auth_type" "$ecr_aws_region"
+}
+
+configure_ecs_instance "$@"
